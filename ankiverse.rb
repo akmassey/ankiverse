@@ -1,4 +1,5 @@
-#!/usr/bin/ruby -w
+#! /usr/bin/env ruby -w
+# frozen_string_literal: true
 
 require 'rubygems'
 require 'nokogiri'
@@ -6,15 +7,18 @@ require 'sinatra'
 require 'yaml'
 
 require RUBY_VERSION < '1.9' ? 'fastercsv' : 'csv'
-CSV = FasterCSV if not defined? CSV
+CSV = FasterCSV unless defined? CSV
 
 require './anki_card_generator'
 require './esv_api_request'
 require './sentence_splitter'
 
+##
+# AnkiVerse is a simple Sinatra application that generates Anki cards from
+# poems or natural language text.
+#
 class AnkiVerse < Sinatra::Base
-
-  SUGGESTED_PASSAGES = (<<-END).split(/\n/).map {|line| line.strip }
+  SUGGESTED_PASSAGES = (<<-SUGGESTED).split(/\n/).map(&:strip)
     Genesis 1
     Genesis 12
     Exodus 14
@@ -49,7 +53,7 @@ class AnkiVerse < Sinatra::Base
     Revelation 1
     Revelation 21
     Revelation 22
-  END
+  SUGGESTED
 
   get '/' do
     @passage = SUGGESTED_PASSAGES[rand(SUGGESTED_PASSAGES.size)]
@@ -57,25 +61,28 @@ class AnkiVerse < Sinatra::Base
   end
 
   post '/' do
-    next params.to_yaml if params["debug"]
+    next params.to_yaml if params['debug']
 
-    response['Content-Type'] = "text/csv; charset=utf-8"
-    response['Content-Disposition'] = "attachment; filename=ankiverse.csv"
+    response['Content-Type'] = 'text/csv; charset=utf-8'
+    response['Content-Disposition'] = 'attachment; filename=ankiverse.csv'
 
-    AnkiCardGenerator.new(params["poem"], params["other_fields"]).
-      csv(:lines => params["lines"].map(&:to_i),
-          :ellipsis => !!params["ellipsis"])
+    AnkiCardGenerator.new(params['poem'], params['other_fields'])
+                     .csv(lines: params['lines'].map(&:to_i),
+                          ellipsis: !!params['ellipsis'])
   end
 
   get '/bible/:passage/:version/:verse_numbers?' do
+    with_verse_numbers = params[:verse_numbers] == 'with_verse_numbers'
+
     case params[:version]
+
     when 'NIV'
-      body = Net::HTTP.get(URI.parse("https://www.biblegateway.com/passage/?version=NIV&search=" + params[:passage].gsub(/\s+/, '+')))
+      body = Net::HTTP.get(URI.parse('https://www.biblegateway.com/passage/?version=NIV&search=' + params[:passage].gsub(/\s+/, '+')))
       doc = Nokogiri(body.gsub(/\<br[^>]*?\>/, "\n"))
       passage = doc.css('.passage-text')
       passage.search('h1').remove
       passage.search('h3').remove
-      passage.search('sup').remove unless params[:verse_numbers] == 'with_verse_numbers'
+      passage.search('sup').remove unless with_verse_numbers
       passage.search('.chapternum').remove
       passage.search('.footnotes').remove
       passage.search('.crossrefs').remove
@@ -84,12 +91,11 @@ class AnkiVerse < Sinatra::Base
       text = "#{ref}\n#{passage.text}\n#{ref}"
 
     when 'ESV'
-
       options = {
-        :key => "IP",
-        :output_format => "plain-text",
-        :line_length => 0,
-        :dont_include => %w(
+        key: 'IP',
+        output_format: 'plain-text',
+        line_length: 0,
+        dont_include: %w[
           passage-references
           first-verse-numbers
           footnotes
@@ -100,27 +106,25 @@ class AnkiVerse < Sinatra::Base
           short-copyright
           passage-horizontal-lines
           heading-horizontal-lines
-        )
+        ]
       }
 
-      options[:dont_include] << 'verse_numbers' unless params[:verse_numbers] == 'with_verse_numbers'
-
+      options[:dont_include] << 'verse_numbers' unless with_verse_numbers
 
       response = EsvApiRequest.execute(:passageQuery,
         options.merge(:passage => params[:passage]))
 
       # Add whitespace to verse numbers if necessary for more readability
-      response.gsub!("\]", "\] ") if params[:verse_numbers] == 'with_verse_numbers'
+      response.gsub!("\]", "\] ") if with_verse_numbers
 
       text = "#{params[:passage]}\n#{response}"
     else
-      raise ArgumentError, "Please select a valid version"
+      raise ArgumentError, 'Please select a valid version'
     end
 
     @passage = params[:passage]
-    @poem = SentenceSplitter.new(text).lines_of(5..12).join("\n")
+    @poem = SentenceSplitter.new(text).lines_of(5..12).join('\n')
     @other_fields = [@passage]
     erb :index
   end
-
 end
